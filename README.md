@@ -98,8 +98,8 @@ node server.js
 
 **Terminal 2 – Mock Bin Sensor:**
 ```
-cd ml-scripts
-python predictive_model.py
+cd backend
+node mock-sensor.js
 ```
 
 **Terminal 3 – Mock Restroom Sensor:**
