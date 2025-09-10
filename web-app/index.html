@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Worker Sanitation App</title>
+    <script src="https://unpkg.com/jsqr"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #3f51b5;
+            margin-bottom: 20px;
+        }
+        #reader-container {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        #message {
+            margin-top: 20px;
+            font-weight: bold;
+            font-size: 18px;
+            color: #4caf50;
+        }
+        .submit-button {
+            background-color: #3f51b5;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 16px;
+        }
+        .submit-button:hover {
+            background-color: #303f9f;
+        }
+        .hidden { display: none; }
+        video, canvas {
+            width: 100%;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Sanitation Worker App</h1>
+
+        <!-- QR Scanner -->
+        <div id="reader-container">
+            <video id="video" autoplay></video>
+            <canvas id="canvas" class="hidden"></canvas>
+            <div id="scanner-output">Scanning for QR...</div>
+        </div>
+
+        <!-- Capture Area -->
+        <div id="capture-area" class="hidden">
+            <p><strong>Scanned Asset ID:</strong> <span id="asset-display"></span></p>
+            <video id="video-capture" autoplay></video>
+            <canvas id="canvas-capture" class="hidden"></canvas>
+            <button class="submit-button" id="capture-btn" onclick="capturePhoto()">📸 Capture Photo</button>
+            <button class="submit-button hidden" id="retake-btn" onclick="retakePhoto()">🔄 Retake</button>
+            <button class="submit-button hidden" id="submit-btn" onclick="sendData()">✅ Submit Log</button>
+        </div>
+
+        <div id="message"></div>
+    </div>
+
+    <script>
+        const backendUrl = "http://localhost:3000/api/v1/qr-log"; // change in prod
+        let assetId = "";
+        let photoDataUrl = "";
+        let stream = null;  // one stream reused for scan & capture
+        let scannerActive = false;
+
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const tick = () => {
+            if (!scannerActive) return;
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.height = video.videoHeight;
+                canvas.width = video.videoWidth;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                let code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
+                if (code) {
+                    onScanSuccess(code.data);
+                    return;
+                }
+            }
+            requestAnimationFrame(tick);
+        };
+
+        const onScanSuccess = (decodedText) => {
+            scannerActive = false;
+            assetId = decodedText;
+            document.getElementById("reader-container").classList.add("hidden");
+            document.getElementById("capture-area").classList.remove("hidden");
+            document.getElementById("asset-display").innerText = assetId;
+
+            // Reuse same stream for capture
+            document.getElementById("video-capture").srcObject = stream;
+        };
+
+        const startScanner = async () => {
+            scannerActive = true;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = stream;
+                video.addEventListener("play", () => {
+                    if (scannerActive) requestAnimationFrame(tick);
+                });
+            } catch (err) {
+                console.error("Camera error:", err);
+                alert("Camera access denied.");
+            }
+        };
+
+        const capturePhoto = () => {
+            const videoCapture = document.getElementById("video-capture");
+            const canvasCapture = document.getElementById("canvas-capture");
+            const ctxCap = canvasCapture.getContext("2d");
+
+            canvasCapture.width = videoCapture.videoWidth;
+            canvasCapture.height = videoCapture.videoHeight;
+            ctxCap.drawImage(videoCapture, 0, 0, canvasCapture.width, canvasCapture.height);
+            photoDataUrl = canvasCapture.toDataURL("image/jpeg");
+
+            videoCapture.classList.add("hidden");
+            document.getElementById("capture-btn").classList.add("hidden");
+            canvasCapture.classList.remove("hidden");
+            document.getElementById("retake-btn").classList.remove("hidden");
+            document.getElementById("submit-btn").classList.remove("hidden");
+        };
+
+        const retakePhoto = () => {
+            document.getElementById("video-capture").classList.remove("hidden");
+            document.getElementById("canvas-capture").classList.add("hidden");
+            document.getElementById("capture-btn").classList.remove("hidden");
+            document.getElementById("retake-btn").classList.add("hidden");
+            document.getElementById("submit-btn").classList.add("hidden");
+        };
+
+        const sendData = async () => {
+            const payload = {
+                asset_id: assetId,
+                cleaner_id: "CLEANER-001",
+                timestamp: new Date().toISOString(),
+                gps: { lat: 23.1795, lng: 75.7663 },
+                photoDataUrl: photoDataUrl
+            };
+            document.getElementById("submit-btn").disabled = true;
+
+            try {
+                const res = await fetch(backendUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                await res.json();
+                document.getElementById("message").innerText = "✅ Log submitted successfully!";
+                console.log("Sent:", payload);
+
+                // stop camera after submission
+                if (stream) {
+                    stream.getTracks().forEach(t => t.stop());
+                }
+            } catch (err) {
+                document.getElementById("message").innerText = "❌ Error submitting log.";
+                console.error("Error:", err);
+            }
+        };
+
+        window.onload = startScanner;
+    </script>
+</body>
+</html>

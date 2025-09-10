@@ -1,0 +1,15 @@
+# Node.js dependencies
+node_modules
+
+# Logs
+*.log
+
+# Editor/OS files
+.DS_Store
+.vscode
+
+# Python venv
+venv
+
+# QR code output
+qr-codes/
